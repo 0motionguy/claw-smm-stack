@@ -1,0 +1,130 @@
+version: '3.8'
+
+services:
+  # OpenClaw Gateway
+  gateway:
+    image: openclaw/openclaw:latest
+    restart: always
+    ports:
+      - "18789:18789"
+    volumes:
+      - ./config/openclaw.json:/root/.openclaw/openclaw.json
+      - ./workspace:/root/.openclaw/workspace
+      - ./skills:/root/.openclaw/skills
+    environment:
+      - MOONSHOT_API_KEY=${MOONSHOT_API_KEY}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - smm-network
+
+  # PostgreSQL (Tenant DB)
+  postgres:
+    image: postgres:16-alpine
+    restart: always
+    environment:
+      POSTGRES_DB: smm_agent
+      POSTGRES_USER: ${DB_USER:-smm}
+      POSTGRES_PASSWORD: ${DB_PASS:-smm123}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d
+    ports:
+      - "5432:5432"
+    networks:
+      - smm-network
+
+  # Redis (Queue + Cache)
+  redis:
+    image: redis:7-alpine
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - smm-network
+
+  # n8n (Workflow Automation)
+  n8n:
+    image: n8nio/n8n:latest
+    restart: always
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=${N8N_USER:-admin}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_PASS:-admin}
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=postgres
+      - DB_POSTGRESDB_DATABASE=n8n
+      - DB_POSTGRESDB_USER=${DB_USER:-smm}
+      - DB_POSTGRESDB_PASSWORD=${DB_PASS:-smm123}
+    volumes:
+      - n8n_data:/home/node/.n8n
+    depends_on:
+      - postgres
+    networks:
+      - smm-network
+
+  # Qdrant (Vector DB for RAG)
+  qdrant:
+    image: qdrant/qdrant:latest
+    restart: always
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - smm-network
+
+  # Worker Service
+  worker:
+    build:
+      context: ./services/worker
+      dockerfile: Dockerfile
+    restart: always
+    environment:
+      - DATABASE_URL=postgresql://${DB_USER:-smm}:${DB_PASS:-smm123}@postgres:5432/smm_agent
+      - REDIS_URL=redis://redis:6379
+      - QDRANT_URL=http://qdrant:6333
+      - MOONSHOT_API_KEY=${MOONSHOT_API_KEY}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - META_APP_ID=${META_APP_ID}
+      - META_APP_SECRET=${META_APP_SECRET}
+    depends_on:
+      - postgres
+      - redis
+      - qdrant
+    networks:
+      - smm-network
+
+  # Dashboard
+  dashboard:
+    build:
+      context: ./services/dashboard
+      dockerfile: Dockerfile
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=postgresql://${DB_USER:-smm}:${DB_PASS:-smm123}@postgres:5432/smm_agent
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - smm-network
+
+volumes:
+  pgdata:
+  n8n_data:
+  redis_data:
+  qdrant_data:
+
+networks:
+  smm-network:
+    driver: bridge
