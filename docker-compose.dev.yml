@@ -1,0 +1,77 @@
+version: '3.9'
+
+services:
+  worker:
+    build:
+      context: ./services/worker
+      dockerfile: Dockerfile.dev
+    command: npm run dev
+    volumes:
+      - ./services/worker/src:/app/src:cached
+      - ./services/worker/package.json:/app/package.json:cached
+      - ./services/worker/tsconfig.json:/app/tsconfig.json:cached
+      - ./config:/app/config:ro
+      - ./skills:/app/skills:ro
+      - /app/node_modules
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://${POSTGRES_USER:-clawadmin}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-clawsmm}
+      REDIS_URL: redis://redis:6379
+      QDRANT_URL: http://qdrant:6333
+      PORT: 4000
+      LOG_LEVEL: debug
+    ports:
+      - "4000:4000"
+      - "9229:9229"
+    stdin_open: true
+    tty: true
+
+  dashboard:
+    build:
+      context: ./services/dashboard
+      dockerfile: Dockerfile.dev
+    command: npm run dev
+    volumes:
+      - ./services/dashboard/src:/app/src:cached
+      - ./services/dashboard/public:/app/public:cached
+      - ./services/dashboard/package.json:/app/package.json:cached
+      - ./services/dashboard/tsconfig.json:/app/tsconfig.json:cached
+      - ./services/dashboard/next.config.js:/app/next.config.js:cached
+      - ./services/dashboard/tailwind.config.js:/app/tailwind.config.js:cached
+      - ./services/dashboard/postcss.config.js:/app/postcss.config.js:cached
+      - /app/node_modules
+      - /app/.next
+    environment:
+      NODE_ENV: development
+      NEXT_PUBLIC_API_URL: http://localhost:4000
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+      WATCHPACK_POLLING: "true"
+    ports:
+      - "3000:3000"
+    stdin_open: true
+    tty: true
+
+  postgres:
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-clawsmm_dev}
+      POSTGRES_USER: ${POSTGRES_USER:-clawadmin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+
+  redis:
+    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+
+  qdrant:
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+
+  n8n:
+    environment:
+      N8N_LOG_LEVEL: debug
+      N8N_LOG_OUTPUT: console
+    ports:
+      - "5678:5678"

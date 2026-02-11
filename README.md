@@ -38,21 +38,37 @@
 
 ```bash
 # 1. Clone and setup
-git clone https://github.com/1337/claw-smm-stack.git
+git clone https://github.com/0motionguy/claw-smm-stack.git
 cd claw-smm-stack
 
 # 2. Configure environment
 cp .env.example .env
 # Edit .env with your API keys
 
-# 3. Start services
-docker-compose up -d
+# 3. Start full stack
+docker compose up -d
 
-# 4. Run migrations
-docker-compose exec postgres psql -U smm -d smm_agent -f /docker-entrypoint-initdb.d/001_create_tenants.sql
+# 4. Migrations run automatically via Docker entrypoint
 
-# 5. Worker is running!
-docker-compose logs -f worker
+# 5. Verify
+curl localhost:4000/health   # Worker
+curl localhost:3000           # Dashboard
+
+# 6. Create demo tenant
+./scripts/seed-demo.sh
+```
+
+### Local Development
+
+```bash
+# Start infrastructure only
+docker compose -f docker-compose.dev.yml up -d postgres redis qdrant
+
+# Worker (hot reload)
+cd services/worker && npm install && npm run dev
+
+# Dashboard (hot reload)
+cd services/dashboard && npm install && npm run dev
 ```
 
 ## Multi-Agent Team
@@ -77,15 +93,52 @@ docker-compose logs -f worker
 
 ## Build Status
 
-- [x] Docker Compose stack
-- [x] Database schema
-- [ ] Instagram API integration
-- [ ] Engagement Worker (CRITICAL)
-- [ ] Content Worker
-- [ ] DeepSeek RAG
-- [ ] LLM Router
-- [ ] Dashboard
+- [x] Docker Compose stack (7 services: gateway, postgres, redis, qdrant, n8n, worker, dashboard)
+- [x] Database schema (6 migration files with indexes)
+- [x] Instagram Graph API v21.0 integration (comments, DMs, publishing, insights)
+- [x] Engagement Worker (classify -> route -> reply/draft/escalate/hide)
+- [x] Content Worker (captions, scheduling, calendar generation)
+- [x] Intel Worker (analytics, competitor monitoring, spike detection)
+- [x] Comms Worker (daily briefing, weekly report, lead notifications)
+- [x] Admin Worker (health checks, cost tracking, token management)
+- [x] DeepSeek RAG (Qdrant vector search)
+- [x] Multi-LLM Router (Kimi K2.5 80% / Opus 4.6 15% / Claude Pro 5%)
+- [x] BullMQ Job Queues (comment, dm, content, report)
+- [x] Heartbeat System (cron-driven: health, analytics, briefings, reports)
+- [x] Next.js Dashboard (tenant CRUD, analytics charts, approval queue)
+- [x] Circuit Breaker + Rate Limiter + Token Manager
+- [x] DROID Mobile Agent (Puppeteer + ADB automation)
+- [x] OpenClaw Skills (5 skill definitions)
+- [x] Operational Scripts (onboard, offboard, backup, deploy, seed)
+- [x] Tests (circuit-breaker, router, engage, instagram)
+- [x] Documentation (onboarding, troubleshooting, API, architecture)
+
+## Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `scripts/tenant-new.sh` | Onboard new client |
+| `scripts/tenant-remove.sh` | Offboard client |
+| `scripts/secrets-rotate.sh` | Rotate Meta tokens |
+| `scripts/backup.sh` | Database backup |
+| `scripts/deploy.sh` | Zero-downtime deploy |
+| `scripts/seed-demo.sh` | Create demo tenant |
+
+## Key Constraints
+
+- All API calls through circuit breaker (max 3 failures -> pause)
+- All LLM calls through router (never direct) with $5/day budget per tenant
+- Rate limits: 180 API/hr, 190 DM/hr, 20 publishes/24hr per tenant
+- TypeScript strict mode, Zod validation on all boundaries
+- All actions logged to audit_log with cost tracking
+
+## Docs
+
+- [Onboarding](docs/ONBOARDING.md) - Client onboarding SOP
+- [Troubleshooting](docs/TROUBLESHOOTING.md) - Common issues
+- [API Reference](docs/API.md) - Endpoint docs
+- [Architecture](docs/ARCHITECTURE.md) - System design
 
 ## License
 
-Private — ICM Motion / Basil Dölger
+Private - ICM Motion / Basil Dolger

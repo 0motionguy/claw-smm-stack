@@ -1,0 +1,71 @@
+{
+  "name": "claw-smm",
+  "version": "1.0.0",
+  "agents": [
+    {
+      "id": "content-worker",
+      "name": "Content Worker",
+      "description": "Generates captions, hashtags, and content calendars",
+      "model": "kimi-k2.5",
+      "fallback_model": "claude-opus-4.6",
+      "max_tokens": 1024,
+      "tools": ["instagram_publish", "metricool_schedule", "qdrant_retrieve"]
+    },
+    {
+      "id": "engage-worker",
+      "name": "Engagement Worker",
+      "description": "Classifies and responds to comments and DMs",
+      "model": "kimi-k2.5",
+      "fallback_model": "claude-opus-4.6",
+      "max_tokens": 512,
+      "tools": ["instagram_comment", "instagram_dm", "qdrant_retrieve"]
+    },
+    {
+      "id": "intel-worker",
+      "name": "Intelligence Worker",
+      "description": "Monitors competitors and collects analytics",
+      "model": "kimi-k2.5",
+      "max_tokens": 2048,
+      "tools": ["apify_scrape", "instagram_insights", "qdrant_store"]
+    },
+    {
+      "id": "comms-worker",
+      "name": "Communications Worker",
+      "description": "Handles client briefings and notifications",
+      "model": "claude-opus-4.6",
+      "fallback_model": "claude-pro",
+      "max_tokens": 2048,
+      "tools": ["telegram_send", "qdrant_retrieve"]
+    },
+    {
+      "id": "admin-worker",
+      "name": "Admin Worker",
+      "description": "Health checks, token management, cost tracking",
+      "model": "kimi-k2.5",
+      "max_tokens": 512,
+      "tools": ["db_query", "redis_check", "token_refresh"]
+    }
+  ],
+  "routing": {
+    "classify_comment": "engage-worker",
+    "reply_comment": "engage-worker",
+    "handle_dm": "engage-worker",
+    "generate_caption": "content-worker",
+    "schedule_post": "content-worker",
+    "collect_analytics": "intel-worker",
+    "monitor_competitor": "intel-worker",
+    "send_briefing": "comms-worker",
+    "health_check": "admin-worker",
+    "refresh_token": "admin-worker"
+  },
+  "circuit_breaker": {
+    "max_retries": 2,
+    "consecutive_failures_threshold": 3,
+    "reset_timeout_ms": 60000
+  },
+  "rate_limits": {
+    "instagram_api": 180,
+    "instagram_dm": 190,
+    "instagram_publish": 20
+  }
+}
