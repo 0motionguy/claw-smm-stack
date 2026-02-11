@@ -1,0 +1,13 @@
+{
+  "name": "droid-smm-bridge",
+  "version": "1.0.0",
+  "description": "Webhook bridge for DROID SMM control",
+  "main": "droid-bridge.js",
+  "scripts": {
+    "start": "node droid-bridge.js",
+    "dev": "nodemon droid-bridge.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  }
+}
