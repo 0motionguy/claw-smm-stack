@@ -1,0 +1,53 @@
+# OpenClaw Gateway Config for DROID
+{
+  "auth": {
+    "profiles": {
+      "moonshot:default": {
+        "provider": "moonshot",
+        "mode": "api_key"
+      },
+      "openrouter:default": {
+        "provider": "openrouter",
+        "mode": "api_key"
+      }
+    }
+  },
+  "models": {
+    "providers": {
+      "moonshot": {
+        "models": [{
+          "id": "kimi-k2.5",
+          "name": "Kimi K2.5",
+          "contextWindow": 256000
+        }]
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": {
+        "primary": "moonshot/kimi-k2.5"
+      },
+      "models": {
+        "moonshot/kimi-k2.5": {
+          "alias": "Default"
+        }
+      },
+      "maxConcurrent": 2
+    }
+  },
+  "gateway": {
+    "port": 18789,
+    "mode": "local",
+    "bind": "all",
+    "auth": {
+      "mode": "token"
+    }
+  },
+  "channels": {
+    "telegram": {
+      "enabled": true,
+      "dmPolicy": "allowlist"
+    }
+  }
+}
