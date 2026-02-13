@@ -1,0 +1,147 @@
+{
+  "paperMode": true,
+  "initialBankroll": 1000,
+  "reportIntervalMinutes": 60,
+  "strategies": {
+    "binance-lag": {
+      "enabled": true,
+      "maxPositionUSD": 200,
+      "maxDailyTrades": 20,
+      "minConfidence": 0.90,
+      "scanIntervalMs": 2000,
+      "confirmationWindowMs": 5000,
+      "minEdgePercent": 5,
+      "symbols": ["btcusdt", "ethusdt", "solusdt"]
+    },
+    "high-prob-bonds": {
+      "enabled": true,
+      "maxPositionUSD": 50,
+      "maxDailyTrades": 5,
+      "minConfidence": 0.90,
+      "scanIntervalMs": 60000
+    },
+    "negrisk-arb": {
+      "enabled": true,
+      "maxPositionUSD": 100,
+      "maxDailyTrades": 10,
+      "minConfidence": 0.95,
+      "scanIntervalMs": 30000
+    },
+    "spread-capture": {
+      "enabled": true,
+      "maxPositionUSD": 30,
+      "maxDailyTrades": 15,
+      "minConfidence": 0.60,
+      "scanIntervalMs": 45000
+    },
+    "combinatorial-arb": {
+      "enabled": true,
+      "maxPositionUSD": 100,
+      "maxDailyTrades": 5,
+      "minConfidence": 0.90,
+      "scanIntervalMs": 180000
+    },
+    "weather-edge": {
+      "enabled": true,
+      "maxPositionUSD": 30,
+      "maxDailyTrades": 3,
+      "minConfidence": 0.60,
+      "scanIntervalMs": 300000
+    },
+    "copy-whale": {
+      "enabled": true,
+      "maxPositionUSD": 50,
+      "maxDailyTrades": 5,
+      "minConfidence": 0.55,
+      "scanIntervalMs": 60000
+    },
+    "news-catalyst": {
+      "enabled": true,
+      "maxPositionUSD": 40,
+      "maxDailyTrades": 3,
+      "minConfidence": 0.55,
+      "scanIntervalMs": 120000
+    },
+    "liquidity-snipe": {
+      "enabled": true,
+      "maxPositionUSD": 25,
+      "maxDailyTrades": 3,
+      "minConfidence": 0.55,
+      "scanIntervalMs": 120000
+    },
+    "crypto-momentum": {
+      "enabled": true,
+      "maxPositionUSD": 30,
+      "maxDailyTrades": 5,
+      "minConfidence": 0.55,
+      "scanIntervalMs": 90000
+    },
+    "cross-platform": {
+      "enabled": true,
+      "maxPositionUSD": 50,
+      "maxDailyTrades": 3,
+      "minConfidence": 0.90,
+      "scanIntervalMs": 180000
+    },
+    "dispute-edge": {
+      "enabled": true,
+      "maxPositionUSD": 40,
+      "maxDailyTrades": 2,
+      "minConfidence": 0.60,
+      "scanIntervalMs": 120000
+    }
+  },
+  "risk": {
+    "dailyLossLimitUSD": 50,
+    "maxPositionsPerCategory": 3,
+    "drawdownCircuitBreakerPercent": 10,
+    "maxConcurrentPositions": 25,
+    "maxSinglePositionPercent": 5,
+    "correlationCheckEnabled": true,
+    "circuitBreakerCooldownMs": 86400000
+  },
+  "execution": {
+    "maxSlippagePercent": 2.0,
+    "minLiquidityUSD": 500,
+    "maxOrderSizeUSD": 100,
+    "splitThresholdUSD": 50,
+    "splitCount": 3,
+    "useGTC": true,
+    "priceImprovementCents": 0.5,
+    "maxBatchSize": 15,
+    "supportFAK": true
+  },
+  "gas": {
+    "minTradeSizeUSD": 10,
+    "offPeakHoursUTC": [2, 6],
+    "maxGasPrice": 100,
+    "batchEnabled": true,
+    "batchWindowMs": 5000,
+    "maxBatchSize": 15
+  },
+  "whaleWallets": [
+    "0xd218e474776403a330142299f7796e8ba32eb5c9",
+    "0x1f2dd6d473f3e824cd2f8a89d9c69fb96f6ad0cf",
+    "0xee613b3fc183ee44f9da9c05f53e2da107e3debf",
+    "0x492442EaB586F242B53bDa933fD5dE859c8A3782"
+  ],
+  "whaleBaskets": [
+    {
+      "name": "crypto-experts",
+      "description": "Top crypto prediction wallets",
+      "wallets": [
+        "0xd218e474776403a330142299f7796e8ba32eb5c9",
+        "0xee613b3fc183ee44f9da9c05f53e2da107e3debf",
+        "0x492442EaB586F242B53bDa933fD5dE859c8A3782"
+      ]
+    },
+    {
+      "name": "politics-experts",
+      "description": "Top political prediction wallets",
+      "wallets": [
+        "0x1f2dd6d473f3e824cd2f8a89d9c69fb96f6ad0cf"
+      ]
+    }
+  ],
+  "tomorrowApiKey": ""
+}
