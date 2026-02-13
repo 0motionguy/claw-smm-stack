@@ -1,4 +1,4 @@
-import { ClobClient } from '@polymarket/clob-client';
+import { ClobClient, OrderType, Side } from '@polymarket/clob-client';
 import Logger from '../utils/logger';
 import { analyzeOrderBook, calculateSlippage } from '../core/orderbook';
 import { StrategySignal } from '../strategies/base-strategy';
@@ -113,7 +113,7 @@ export class Executor {
                 limitPrice = Math.max(limitPrice, analysis.bestBid + 0.001);
             }
 
-            // Step 4: Split large orders if needed
+            // Step 4: Split large orders and place via CLOB API
             const amounts = this.splitOrder(signal.amountUSD);
 
             Logger.info(
@@ -121,18 +121,46 @@ export class Executor {
                 `Spread: ${analysis.spreadPercent.toFixed(2)}% | Slippage: ${slippage.toFixed(2)}% | ` +
                 `Splits: ${amounts.length}`
             );
+            let totalFillSize = 0;
+            let lastOrderId = '';
 
-            // Step 5: Place order(s) - in paper mode this is simulated
-            // For live mode, this would use clobClient.postOrder()
-            // For now, return simulated execution
-            const fillSize = signal.amountUSD / limitPrice;
+            for (const amount of amounts) {
+                const orderArgs = {
+                    tokenID: signal.tokenId,
+                    price: parseFloat(limitPrice.toFixed(4)),
+                    side: signal.action === 'buy' ? Side.BUY : Side.SELL,
+                    size: parseFloat((amount / limitPrice).toFixed(2)),
+                };
+
+                const signedOrder = await this.clobClient.createOrder(orderArgs);
+                const resp = await this.clobClient.postOrder(signedOrder, OrderType.GTC);
+
+                if (resp.success) {
+                    totalFillSize += orderArgs.size;
+                    lastOrderId = resp.orderID || `exec-${Date.now()}`;
+                    Logger.success(
+                        `[Executor] Order placed: ${signal.action.toUpperCase()} ${orderArgs.size} @ ${limitPrice.toFixed(4)} | ID: ${lastOrderId}`
+                    );
+                } else {
+                    Logger.warning(`[Executor] Order rejected: ${JSON.stringify(resp)}`);
+                }
+            }
+
+            if (totalFillSize === 0) {
+                return {
+                    success: false,
+                    error: 'All order splits rejected',
+                    signal,
+                    executedAt: startTime,
+                };
+            }
 
             return {
                 success: true,
-                orderId: `exec-${Date.now()}`,
+                orderId: lastOrderId,
                 fillPrice: limitPrice,
-                fillSize,
-                fillAmountUSD: signal.amountUSD,
+                fillSize: totalFillSize,
+                fillAmountUSD: totalFillSize * limitPrice,
                 signal,
                 executedAt: startTime,
             };
@@ -178,15 +206,36 @@ export class Executor {
                 `Spread: ${analysis.spreadPercent.toFixed(2)}%`
             );
 
-            // Step 3: Place FAK order - in paper mode this is simulated
-            // For live mode, this would use clobClient.postOrder() with FAK flag
+            // Step 3: Place FAK order via CLOB API
             const fillSize = signal.amountUSD / limitPrice;
+            const orderArgs = {
+                tokenID: signal.tokenId,
+                price: parseFloat(limitPrice.toFixed(4)),
+                side: signal.action === 'buy' ? Side.BUY : Side.SELL,
+                size: parseFloat(fillSize.toFixed(2)),
+            };
+
+            const signedOrder = await this.clobClient.createOrder(orderArgs);
+            const resp = await this.clobClient.postOrder(signedOrder, OrderType.FOK);
+
+            if (!resp.success) {
+                return {
+                    success: false,
+                    error: `FAK rejected: ${JSON.stringify(resp)}`,
+                    signal,
+                    executedAt: startTime,
+                };
+            }
+
+            Logger.success(
+                `[Executor] FAK filled: ${signal.action.toUpperCase()} ${orderArgs.size} @ ${limitPrice.toFixed(4)}`
+            );
 
             return {
                 success: true,
-                orderId: `exec-fak-${Date.now()}`,
+                orderId: resp.orderID || `exec-fak-${Date.now()}`,
                 fillPrice: limitPrice,
-                fillSize,
+                fillSize: orderArgs.size,
                 fillAmountUSD: signal.amountUSD,
                 signal,
                 executedAt: startTime,

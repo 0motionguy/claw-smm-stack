@@ -11,6 +11,7 @@ import { WebSocketFeed } from './core/ws-feed';
 // Execution
 import { RiskManager } from './execution/risk-manager';
 import { GasOptimizer } from './execution/gas-optimizer';
+import { Executor } from './execution/executor';
 
 // Strategies
 import { BaseStrategy, StrategySignal } from './strategies/base-strategy';
@@ -64,6 +65,7 @@ export class Orchestrator {
     private readonly paperEngine: PaperEngine;
     private readonly riskManager: RiskManager;
     private readonly gasOptimizer: GasOptimizer;
+    private readonly executor: Executor;
     private readonly wsFeed: WebSocketFeed;
     private readonly newsFeed: NewsFeed;
     private readonly binanceFeed: BinanceFeed;
@@ -94,6 +96,7 @@ export class Orchestrator {
             this.config.risk
         );
         this.gasOptimizer = new GasOptimizer(this.config.gas);
+        this.executor = new Executor(clobClient, this.config.execution);
         this.wsFeed = new WebSocketFeed();
         this.newsFeed = new NewsFeed();
 
@@ -116,6 +119,13 @@ export class Orchestrator {
         }
 
         this.isRunning = true;
+
+        // Safety check for live mode
+        if (!this.config.paperMode && !process.env.LIVE_TRADING_CONFIRMED) {
+            Logger.error('[Orchestrator] LIVE MODE requires LIVE_TRADING_CONFIRMED=true env var');
+            Logger.error('[Orchestrator] This prevents accidental live trading. Set paperMode: true or export LIVE_TRADING_CONFIRMED=true');
+            return;
+        }
 
         Logger.header('POLYCLAW PRO v2 — STRATEGY ORCHESTRATOR');
         Logger.info(`Mode: ${this.config.paperMode ? 'PAPER' : 'LIVE'}`);
@@ -285,21 +295,43 @@ export class Orchestrator {
             return;
         }
 
-        // Step 3: Execute (paper mode)
+        // Step 3: Execute
         if (this.config.paperMode) {
+            // Paper mode — simulate
             const trade = this.paperEngine.executeTrade(signal);
             if (trade) {
-                // Track in risk manager
                 this.riskManager.trackPosition(signal.marketId, signal.marketQuestion);
-
-                // Record trade for strategy
                 const strategy = this.strategies.find((s) => s.name === signal.strategyName);
                 if (strategy) {
                     strategy.recordTrade();
                 }
             }
+        } else {
+            // Live mode — real CLOB execution
+            if (!process.env.LIVE_TRADING_CONFIRMED) {
+                Logger.error('[Orchestrator] LIVE_TRADING_CONFIRMED env var not set — refusing to trade. Set LIVE_TRADING_CONFIRMED=true to enable.');
+                return;
+            }
+
+            const result = signal.strategyName === 'binance-lag'
+                ? await this.executor.executeFAK(signal)
+                : await this.executor.execute(signal);
+
+            if (result.success) {
+                this.riskManager.trackPosition(signal.marketId, signal.marketQuestion);
+                const strategy = this.strategies.find((s) => s.name === signal.strategyName);
+                if (strategy) {
+                    strategy.recordTrade();
+                }
+                Logger.success(
+                    `[Live] ${signal.action.toUpperCase()} | ${signal.strategyName} | ` +
+                    `$${result.fillAmountUSD?.toFixed(2)} @ ${result.fillPrice?.toFixed(4)} | ` +
+                    `${signal.marketQuestion.slice(0, 45)}...`
+                );
+            } else {
+                Logger.warning(`[Live] Order failed: ${result.error}`);
+            }
         }
-        // Live mode would use Executor here
     }
 
     /**
