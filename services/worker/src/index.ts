@@ -9,14 +9,15 @@ import { RateLimiter } from './utils/rate-limiter';
 import { TokenManager } from './utils/token-manager';
 import { InstagramClient } from './integrations/instagram';
 import { LLMRouter } from './integrations/llm';
-import { DeepSeekClient } from './integrations/deepseek';
+import { DeepSeekVectorStore } from './integrations/deepseek';
 import { ApifyClient } from './integrations/apify';
 import { MetricoolClient } from './integrations/metricool';
 import { TaskRouter } from './router';
-import { COMMENT_QUEUE } from './queues/comment.queue';
-import { DM_QUEUE } from './queues/dm.queue';
-import { CONTENT_QUEUE } from './queues/content.queue';
-import { REPORT_QUEUE } from './queues/report.queue';
+import { COMMENT_QUEUE, CommentJobSchema } from './queues/comment.queue';
+import { DM_QUEUE, DMJobSchema } from './queues/dm.queue';
+import { CONTENT_QUEUE, ContentJobSchema } from './queues/content.queue';
+import { REPORT_QUEUE, ReportJobSchema } from './queues/report.queue';
+import { verifySignature } from './webhooks/verify';
 
 const PORT = parseInt(process.env.WORKER_PORT || process.env.PORT || '4000');
 
@@ -24,8 +25,11 @@ async function main() {
   logger.info('Starting Clawbot SMM Worker Service...');
 
   // --- Database ---
+  if (!process.env.DATABASE_URL) {
+    throw new Error('DATABASE_URL environment variable is required');
+  }
   const db = new Pool({
-    connectionString: process.env.DATABASE_URL || 'postgresql://smm:smm123@localhost:5432/smm_agent',
+    connectionString: process.env.DATABASE_URL,
     max: 20,
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 2000,
@@ -41,7 +45,7 @@ async function main() {
   logger.info('Redis connected');
 
   // --- Dependencies ---
-  const circuitBreaker = new CircuitBreaker({ maxFailures: 3, resetTimeout: 60000 });
+  const circuitBreaker = new CircuitBreaker('meta-api', { consecutiveFailuresThreshold: 3, resetTimeoutMs: 60000 });
   const rateLimiter = new RateLimiter(redis);
   const tokenManager = new TokenManager(db);
   const ig = new InstagramClient({
@@ -49,7 +53,7 @@ async function main() {
     appSecret: process.env.META_APP_SECRET || '',
   });
   const llm = new LLMRouter(db);
-  const rag = new DeepSeekClient();
+  const rag = new DeepSeekVectorStore();
   const apify = new ApifyClient();
   const metricool = new MetricoolClient();
 
@@ -63,34 +67,54 @@ async function main() {
   const connection = { host: redis.options.host || 'localhost', port: redis.options.port || 6379 };
 
   const commentWorker = new BullWorker(COMMENT_QUEUE, async (job) => {
-    const { tenantId, ...data } = job.data;
-    const tenant = await db.query('SELECT ig_access_token, ig_user_id FROM tenants WHERE id = $1', [tenantId]);
+    const parsed = CommentJobSchema.safeParse(job.data);
+    if (!parsed.success) {
+      logger.error('Invalid comment job data', { job_id: job.id, errors: parsed.error.issues });
+      return;
+    }
+    const { tenantId, ...data } = parsed.data;
+    const tenant = await db.query('SELECT meta_access_token, ig_user_id FROM tenants WHERE id = $1', [tenantId]);
     if (tenant.rows[0]) {
-      ig.updateCredentials(tenant.rows[0].ig_access_token, tenant.rows[0].ig_user_id);
+      ig.updateCredentials(tenant.rows[0].meta_access_token, tenant.rows[0].ig_user_id);
     }
     await router.route('process_comment', tenantId, data);
   }, { connection, concurrency: 5 });
 
   const dmWorker = new BullWorker(DM_QUEUE, async (job) => {
-    const { tenantId, ...data } = job.data;
-    const tenant = await db.query('SELECT ig_access_token, ig_user_id FROM tenants WHERE id = $1', [tenantId]);
+    const parsed = DMJobSchema.safeParse(job.data);
+    if (!parsed.success) {
+      logger.error('Invalid DM job data', { job_id: job.id, errors: parsed.error.issues });
+      return;
+    }
+    const { tenantId, ...data } = parsed.data;
+    const tenant = await db.query('SELECT meta_access_token, ig_user_id FROM tenants WHERE id = $1', [tenantId]);
     if (tenant.rows[0]) {
-      ig.updateCredentials(tenant.rows[0].ig_access_token, tenant.rows[0].ig_user_id);
+      ig.updateCredentials(tenant.rows[0].meta_access_token, tenant.rows[0].ig_user_id);
     }
     await router.route('process_dm', tenantId, data);
   }, { connection, concurrency: 3 });
 
   const contentWorker = new BullWorker(CONTENT_QUEUE, async (job) => {
-    const { tenantId, type, ...data } = job.data;
-    const tenant = await db.query('SELECT ig_access_token, ig_user_id FROM tenants WHERE id = $1', [tenantId]);
+    const parsed = ContentJobSchema.safeParse(job.data);
+    if (!parsed.success) {
+      logger.error('Invalid content job data', { job_id: job.id, errors: parsed.error.issues });
+      return;
+    }
+    const { tenantId, type, ...data } = parsed.data;
+    const tenant = await db.query('SELECT meta_access_token, ig_user_id FROM tenants WHERE id = $1', [tenantId]);
     if (tenant.rows[0]) {
-      ig.updateCredentials(tenant.rows[0].ig_access_token, tenant.rows[0].ig_user_id);
+      ig.updateCredentials(tenant.rows[0].meta_access_token, tenant.rows[0].ig_user_id);
     }
     await router.route(type, tenantId, data);
   }, { connection, concurrency: 2 });
 
   const reportWorker = new BullWorker(REPORT_QUEUE, async (job) => {
-    const { tenantId, type } = job.data;
+    const parsed = ReportJobSchema.safeParse(job.data);
+    if (!parsed.success) {
+      logger.error('Invalid report job data', { job_id: job.id, errors: parsed.error.issues });
+      return;
+    }
+    const { tenantId, type } = parsed.data;
     await router.route(type, tenantId, {});
   }, { connection, concurrency: 1 });
 
@@ -175,7 +199,7 @@ async function main() {
 
   // --- Express Health Server ---
   const app = express();
-  app.use(express.json());
+  app.use(express.json({ limit: '1mb' }));
 
   app.get('/health', async (_req, res) => {
     try {
@@ -214,17 +238,23 @@ async function main() {
     }
   });
 
-  // Legacy webhook endpoint (from original repo)
+  // Legacy webhook endpoint (from original repo) — with signature verification
   app.post('/webhook/instagram/:tenantId', async (req, res) => {
+    const signature = req.headers['x-hub-signature-256'] as string;
+    if (!verifySignature(JSON.stringify(req.body), signature)) {
+      logger.warn('Webhook signature verification failed', { tenant_id: req.params.tenantId });
+      res.status(401).send('Invalid signature');
+      return;
+    }
+
     const { tenantId } = req.params;
     logger.info('Received Instagram webhook', { tenantId });
-    // Route to engage worker via queue for better reliability
     const { Queue } = await import('bullmq');
-    const commentQueue = new Queue(COMMENT_QUEUE, { connection });
+    const queue = new Queue(COMMENT_QUEUE, { connection });
     for (const entry of (req.body.entry || [])) {
       for (const change of (entry.changes || [])) {
         if (change.value) {
-          await commentQueue.add('process_comment', {
+          await queue.add('process_comment', {
             tenantId,
             ig_comment_id: change.value.id || `webhook_${Date.now()}`,
             author_name: change.value.from?.username || 'unknown',
@@ -237,13 +267,14 @@ async function main() {
     res.status(200).send('OK');
   });
 
-  app.listen(PORT, () => {
+  const server = app.listen(PORT, () => {
     logger.info(`Worker service listening on port ${PORT}`);
   });
 
   // --- Graceful Shutdown ---
   const shutdown = async (signal: string) => {
     logger.info(`Received ${signal}, shutting down gracefully...`);
+    server.close();
     await commentWorker.close();
     await dmWorker.close();
     await contentWorker.close();

@@ -1,12 +1,8 @@
 import { Queue, Job } from 'bullmq';
 import { z } from 'zod';
-import IORedis from 'ioredis';
+import { getQueueConnection } from './connection';
 
-const connection = new IORedis({
-  host: process.env.REDIS_HOST || 'localhost',
-  port: parseInt(process.env.REDIS_PORT || '6379'),
-  maxRetriesPerRequest: null,
-});
+export const DM_QUEUE = 'dm-processing';
 
 export const DMJobSchema = z.object({
   tenantId: z.string().uuid(),
@@ -17,7 +13,7 @@ export const DMJobSchema = z.object({
 
 export type DMJobData = z.infer<typeof DMJobSchema>;
 
-export const dmQueue = new Queue<DMJobData>('dm-processing', { connection });
+export const dmQueue = new Queue<DMJobData>(DM_QUEUE, { connection: getQueueConnection() });
 
 export async function addDMJob(data: DMJobData): Promise<Job<DMJobData>> {
   const validated = DMJobSchema.parse(data);

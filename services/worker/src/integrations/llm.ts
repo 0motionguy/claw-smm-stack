@@ -159,7 +159,7 @@ export class LLMRouter {
       return response.data.choices[0].message.content.trim();
     } catch (error) {
       logger.error('Opus call failed', { error: String(error) });
-      return 'I apologize, but I am unable to process this request right now. Please try again shortly.';
+      throw error;
     }
   }
 

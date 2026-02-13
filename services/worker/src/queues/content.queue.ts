@@ -1,12 +1,8 @@
 import { Queue, Job } from 'bullmq';
 import { z } from 'zod';
-import IORedis from 'ioredis';
+import { getQueueConnection } from './connection';
 
-const connection = new IORedis({
-  host: process.env.REDIS_HOST || 'localhost',
-  port: parseInt(process.env.REDIS_PORT || '6379'),
-  maxRetriesPerRequest: null,
-});
+export const CONTENT_QUEUE = 'content-processing';
 
 export const ContentJobSchema = z.object({
   tenantId: z.string().uuid(),
@@ -19,7 +15,7 @@ export const ContentJobSchema = z.object({
 
 export type ContentJobData = z.infer<typeof ContentJobSchema>;
 
-export const contentQueue = new Queue<ContentJobData>('content-processing', { connection });
+export const contentQueue = new Queue<ContentJobData>(CONTENT_QUEUE, { connection: getQueueConnection() });
 
 export async function addContentJob(data: ContentJobData): Promise<Job<ContentJobData>> {
   const validated = ContentJobSchema.parse(data);

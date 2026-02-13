@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // Mock all worker dependencies
 vi.mock('../integrations/instagram', () => ({ InstagramClient: vi.fn() }));
 vi.mock('../integrations/llm', () => ({ LLMRouter: vi.fn() }));
-vi.mock('../integrations/deepseek', () => ({ DeepSeekClient: vi.fn() }));
+vi.mock('../integrations/deepseek', () => ({ DeepSeekVectorStore: vi.fn() }));
 vi.mock('../integrations/apify', () => ({ ApifyClient: vi.fn() }));
 vi.mock('../integrations/metricool', () => ({ MetricoolClient: vi.fn() }));
 
@@ -16,7 +16,7 @@ const mockDailyBriefing = vi.fn().mockResolvedValue(undefined);
 const mockCollectAnalytics = vi.fn().mockResolvedValue(undefined);
 
 vi.mock('../workers/engage.worker', () => ({
-  EngageWorker: vi.fn().mockImplementation(() => ({
+  EngagementWorker: vi.fn().mockImplementation(() => ({
     processComment: mockProcessComment,
     processDM: mockProcessDM,
   })),
@@ -76,13 +76,13 @@ describe('TaskRouter', () => {
     });
   });
 
-  it('should route process_comment to EngageWorker', async () => {
+  it('should route process_comment to EngagementWorker', async () => {
     const payload = { ig_comment_id: '123', author_name: 'user', text: 'nice!' };
     await router.route('process_comment', 'tenant-1', payload);
     expect(mockProcessComment).toHaveBeenCalledWith('tenant-1', payload);
   });
 
-  it('should route process_dm to EngageWorker', async () => {
+  it('should route process_dm to EngagementWorker', async () => {
     const payload = { ig_sender_id: '456', sender_name: 'user', message_text: 'hello' };
     await router.route('process_dm', 'tenant-1', payload);
     expect(mockProcessDM).toHaveBeenCalledWith('tenant-1', payload);

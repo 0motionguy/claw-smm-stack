@@ -4,14 +4,14 @@ import { CircuitBreaker } from '../utils/circuit-breaker';
 import { RateLimiter } from '../utils/rate-limiter';
 import { InstagramClient } from '../integrations/instagram';
 import { LLMRouter } from '../integrations/llm';
-import { DeepSeekClient } from '../integrations/deepseek';
+import { DeepSeekVectorStore } from '../integrations/deepseek';
 import { ApifyClient } from '../integrations/apify';
 
 export class IntelWorker {
   constructor(
     private ig: InstagramClient,
     private llm: LLMRouter,
-    private rag: DeepSeekClient,
+    private rag: DeepSeekVectorStore,
     private apify: ApifyClient,
     private rateLimiter: RateLimiter,
     private circuitBreaker: CircuitBreaker,

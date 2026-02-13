@@ -1,12 +1,8 @@
-import { Queue, Worker, Job } from 'bullmq';
+import { Queue, Job } from 'bullmq';
 import { z } from 'zod';
-import IORedis from 'ioredis';
+import { getQueueConnection } from './connection';
 
-const connection = new IORedis({
-  host: process.env.REDIS_HOST || 'localhost',
-  port: parseInt(process.env.REDIS_PORT || '6379'),
-  maxRetriesPerRequest: null,
-});
+export const COMMENT_QUEUE = 'comment-processing';
 
 export const CommentJobSchema = z.object({
   tenantId: z.string().uuid(),
@@ -18,7 +14,7 @@ export const CommentJobSchema = z.object({
 
 export type CommentJobData = z.infer<typeof CommentJobSchema>;
 
-export const commentQueue = new Queue<CommentJobData>('comment-processing', { connection });
+export const commentQueue = new Queue<CommentJobData>(COMMENT_QUEUE, { connection: getQueueConnection() });
 
 export async function addCommentJob(data: CommentJobData): Promise<Job<CommentJobData>> {
   const validated = CommentJobSchema.parse(data);

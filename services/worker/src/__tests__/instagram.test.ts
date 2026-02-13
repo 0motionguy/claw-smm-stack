@@ -19,7 +19,9 @@ describe('InstagramClient', () => {
   let mockAxios: any;
 
   beforeEach(() => {
-    client = new InstagramClient('test_token_123', 'user_456');
+    vi.clearAllMocks();
+    client = new InstagramClient({ appId: 'test_app_id', appSecret: 'test_app_secret' });
+    client.updateCredentials('test_token_123', 'user_456');
     mockAxios = (axios.create as any).mock.results[0]?.value || {
       get: vi.fn(),
       post: vi.fn(),
@@ -27,7 +29,7 @@ describe('InstagramClient', () => {
     };
   });
 
-  it('should construct with access token and user ID', () => {
+  it('should construct with app config', () => {
     expect(client).toBeDefined();
   });
 

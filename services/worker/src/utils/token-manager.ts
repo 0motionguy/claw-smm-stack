@@ -62,15 +62,16 @@ export class TokenManager {
       throw new Error('Invalid encrypted token format');
     }
 
-    const [ivHex, authTagHex, encrypted] = parts;
+    const ivHex = parts[0]!;
+    const authTagHex = parts[1]!;
+    const encrypted = parts[2]!;
     const iv = Buffer.from(ivHex, 'hex');
     const authTag = Buffer.from(authTagHex, 'hex');
 
     const decipher = crypto.createDecipheriv(this.algorithm, this.encryptionKey, iv);
     decipher.setAuthTag(authTag);
 
-    let decrypted = decipher.update(encrypted, 'hex', 'utf8');
-    decrypted += decipher.final('utf8');
+    const decrypted = decipher.update(encrypted, 'hex', 'utf8') + decipher.final('utf8');
 
     return decrypted;
   }

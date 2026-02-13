@@ -5,7 +5,11 @@ describe('CircuitBreaker', () => {
   let cb: CircuitBreaker;
 
   beforeEach(() => {
-    cb = new CircuitBreaker({ maxFailures: 3, resetTimeout: 1000 });
+    cb = new CircuitBreaker('test', {
+      consecutiveFailuresThreshold: 3,
+      resetTimeoutMs: 1000,
+      maxRetries: 0,
+    });
   });
 
   it('should execute successfully in closed state', async () => {
@@ -13,7 +17,7 @@ describe('CircuitBreaker', () => {
     expect(result).toBe('ok');
   });
 
-  it('should open after maxFailures consecutive failures', async () => {
+  it('should open after consecutiveFailuresThreshold failures', async () => {
     const failing = () => Promise.reject(new Error('fail'));
 
     for (let i = 0; i < 3; i++) {
@@ -21,7 +25,7 @@ describe('CircuitBreaker', () => {
     }
 
     // Next call should be blocked by open circuit
-    await expect(cb.execute(() => Promise.resolve('ok'))).rejects.toThrow();
+    await expect(cb.execute(() => Promise.resolve('ok'))).rejects.toThrow('Circuit breaker test is OPEN');
   });
 
   it('should transition to half-open after reset timeout', async () => {
@@ -79,5 +83,12 @@ describe('CircuitBreaker', () => {
     // Should still be closed
     const result = await cb.execute(() => Promise.resolve('still open'));
     expect(result).toBe('still open');
+  });
+
+  it('should expose stats', () => {
+    const stats = cb.getStats();
+    expect(stats).toHaveProperty('state', 'CLOSED');
+    expect(stats).toHaveProperty('failureCount', 0);
+    expect(stats).toHaveProperty('successCount', 0);
   });
 });

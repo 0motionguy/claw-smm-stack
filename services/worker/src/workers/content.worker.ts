@@ -4,14 +4,14 @@ import { CircuitBreaker } from '../utils/circuit-breaker';
 import { RateLimiter } from '../utils/rate-limiter';
 import { InstagramClient } from '../integrations/instagram';
 import { LLMRouter } from '../integrations/llm';
-import { DeepSeekClient } from '../integrations/deepseek';
+import { DeepSeekVectorStore } from '../integrations/deepseek';
 import { MetricoolClient } from '../integrations/metricool';
 
 export class ContentWorker {
   constructor(
     private ig: InstagramClient,
     private llm: LLMRouter,
-    private rag: DeepSeekClient,
+    private rag: DeepSeekVectorStore,
     private metricool: MetricoolClient,
     private rateLimiter: RateLimiter,
     private circuitBreaker: CircuitBreaker,
@@ -39,7 +39,7 @@ ${contextStr}`;
     // Parse hashtags from response
     const hashtagMatch = response.match(/HASHTAGS?:\s*(.*)/i);
     const hashtags = hashtagMatch
-      ? hashtagMatch[1].match(/#\w+/g) || []
+      ? (hashtagMatch[1] ?? '').match(/#\w+/g) || []
       : response.match(/#\w+/g) || [];
     const caption = response.replace(/HASHTAGS?:.*$/im, '').trim();
 

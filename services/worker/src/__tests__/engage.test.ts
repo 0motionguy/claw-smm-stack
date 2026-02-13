@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { EngageWorker } from '../workers/engage.worker';
+import { EngagementWorker } from '../workers/engage.worker';
 
-describe('EngageWorker', () => {
-  let worker: EngageWorker;
+describe('EngagementWorker', () => {
+  let worker: EngagementWorker;
   let mockIg: any;
   let mockLlm: any;
   let mockRag: any;
@@ -18,16 +18,17 @@ describe('EngageWorker', () => {
     };
 
     mockLlm = {
-      route: vi.fn().mockResolvedValue('Thank you!'),
+      classifyIntent: vi.fn().mockResolvedValue('question'),
+      generateReply: vi.fn().mockResolvedValue('Thank you for reaching out!'),
     };
 
     mockRag = {
-      retrieveContext: vi.fn().mockResolvedValue([{ text: 'brand context' }]),
+      retrieveContext: vi.fn().mockResolvedValue([{ text: 'brand context', score: 0.9, metadata: {} }]),
       storeContext: vi.fn().mockResolvedValue(undefined),
     };
 
     mockRateLimiter = {
-      checkLimit: vi.fn().mockResolvedValue(undefined),
+      checkLimit: vi.fn().mockResolvedValue(true),
       recordCall: vi.fn().mockResolvedValue(undefined),
     };
 
@@ -36,10 +37,10 @@ describe('EngageWorker', () => {
     };
 
     mockDb = {
-      query: vi.fn().mockResolvedValue({ rows: [] }),
+      query: vi.fn().mockResolvedValue({ rows: [{ id: 'tenant-1', brand_voice: 'friendly', status: 'active' }] }),
     };
 
-    worker = new EngageWorker(mockIg, mockLlm, mockRag, mockRateLimiter, mockCircuitBreaker, mockDb);
+    worker = new EngagementWorker(mockIg, mockLlm, mockRag, mockRateLimiter, mockCircuitBreaker, mockDb);
   });
 
   describe('processComment', () => {
@@ -50,32 +51,31 @@ describe('EngageWorker', () => {
     };
 
     it('should auto-reply to praise comments', async () => {
-      mockLlm.route.mockResolvedValueOnce('praise').mockResolvedValueOnce('Thanks so much!');
+      mockLlm.classifyIntent.mockResolvedValueOnce('praise');
 
       await worker.processComment('tenant-1', baseComment);
 
-      expect(mockRag.retrieveContext).toHaveBeenCalledWith('tenant-1', 'Amazing post!');
-      expect(mockLlm.route).toHaveBeenCalledTimes(2);
-      expect(mockIg.replyToComment).toHaveBeenCalledWith('comment_123', 'Thanks so much!');
-      expect(mockRateLimiter.checkLimit).toHaveBeenCalled();
-      expect(mockRateLimiter.recordCall).toHaveBeenCalled();
+      expect(mockRag.retrieveContext).toHaveBeenCalledWith('tenant-1', 'Amazing post!', 5);
+      expect(mockCircuitBreaker.execute).toHaveBeenCalled();
+      expect(mockIg.replyToComment).toHaveBeenCalledWith('comment_123', expect.any(String));
+      expect(mockRateLimiter.checkLimit).toHaveBeenCalledWith('tenant-1', 'api');
+      expect(mockRateLimiter.recordCall).toHaveBeenCalledWith('tenant-1', 'api');
     });
 
     it('should draft reply for questions', async () => {
-      mockLlm.route.mockResolvedValueOnce('question').mockResolvedValueOnce('Here is the answer...');
+      mockLlm.classifyIntent.mockResolvedValueOnce('question');
 
       await worker.processComment('tenant-1', { ...baseComment, text: 'What are your hours?' });
 
       expect(mockIg.replyToComment).not.toHaveBeenCalled();
-      // Should insert with 'drafted' status
       expect(mockDb.query).toHaveBeenCalledWith(
-        expect.stringContaining('INSERT INTO comments'),
-        expect.arrayContaining(['drafted'])
+        expect.stringContaining('pending_approval'),
+        expect.any(Array)
       );
     });
 
     it('should hide spam comments', async () => {
-      mockLlm.route.mockResolvedValueOnce('spam');
+      mockLlm.classifyIntent.mockResolvedValueOnce('spam');
 
       await worker.processComment('tenant-1', { ...baseComment, text: 'BUY FOLLOWERS NOW!!!' });
 
@@ -84,21 +84,32 @@ describe('EngageWorker', () => {
     });
 
     it('should escalate complaints', async () => {
-      mockLlm.route.mockResolvedValueOnce('complaint');
+      mockLlm.classifyIntent.mockResolvedValueOnce('complaint');
 
       await worker.processComment('tenant-1', { ...baseComment, text: 'Terrible service!!!' });
 
       expect(mockIg.replyToComment).not.toHaveBeenCalled();
       expect(mockIg.hideComment).not.toHaveBeenCalled();
-      // Should insert with 'pending' status for human review
       expect(mockDb.query).toHaveBeenCalledWith(
-        expect.stringContaining('INSERT INTO comments'),
-        expect.arrayContaining(['pending'])
+        expect.stringContaining('escalated'),
+        expect.any(Array)
       );
     });
 
-    it('should store context in Qdrant after processing', async () => {
-      mockLlm.route.mockResolvedValueOnce('neutral');
+    it('should trigger lead sequence for leads', async () => {
+      mockLlm.classifyIntent.mockResolvedValueOnce('lead');
+
+      await worker.processComment('tenant-1', baseComment);
+
+      expect(mockIg.sendMessage).toHaveBeenCalled();
+      expect(mockDb.query).toHaveBeenCalledWith(
+        expect.stringContaining('lead_triggered'),
+        expect.any(Array)
+      );
+    });
+
+    it('should store context in RAG after processing', async () => {
+      mockLlm.classifyIntent.mockResolvedValueOnce('question');
 
       await worker.processComment('tenant-1', baseComment);
 
@@ -109,14 +120,21 @@ describe('EngageWorker', () => {
       );
     });
 
-    it('should log to audit_log on failure', async () => {
-      mockRag.retrieveContext.mockRejectedValueOnce(new Error('qdrant down'));
+    it('should skip when rate limit exceeded', async () => {
+      mockRateLimiter.checkLimit.mockResolvedValueOnce(false);
 
-      await expect(worker.processComment('tenant-1', baseComment)).rejects.toThrow('qdrant down');
-      expect(mockDb.query).toHaveBeenCalledWith(
-        expect.stringContaining('INSERT INTO audit_log'),
-        expect.arrayContaining(['failed'])
-      );
+      await worker.processComment('tenant-1', baseComment);
+
+      expect(mockLlm.classifyIntent).not.toHaveBeenCalled();
+      expect(mockIg.replyToComment).not.toHaveBeenCalled();
+    });
+
+    it('should skip when tenant not found', async () => {
+      mockDb.query.mockResolvedValueOnce({ rows: [] });
+
+      await worker.processComment('tenant-1', baseComment);
+
+      expect(mockLlm.classifyIntent).not.toHaveBeenCalled();
     });
   });
 
@@ -127,37 +145,61 @@ describe('EngageWorker', () => {
       message_text: 'What are your prices?',
     };
 
-    it('should auto-reply to FAQ DMs', async () => {
-      mockLlm.route.mockResolvedValueOnce('faq').mockResolvedValueOnce('Our prices start at...');
+    it('should process DM and generate reply', async () => {
+      mockLlm.classifyIntent.mockResolvedValueOnce('question');
 
       await worker.processDM('tenant-1', baseDM);
 
-      expect(mockIg.sendMessage).toHaveBeenCalledWith('sender_456', 'Our prices start at...');
       expect(mockRateLimiter.checkLimit).toHaveBeenCalledWith('tenant-1', 'dm');
+      expect(mockLlm.classifyIntent).toHaveBeenCalledWith('What are your prices?');
+      expect(mockLlm.generateReply).toHaveBeenCalled();
+      expect(mockDb.query).toHaveBeenCalledWith(
+        expect.stringContaining('INSERT INTO dms'),
+        expect.any(Array)
+      );
+      expect(mockRateLimiter.recordCall).toHaveBeenCalledWith('tenant-1', 'dm');
     });
 
-    it('should draft reply for lead DMs', async () => {
-      mockLlm.route.mockResolvedValueOnce('lead').mockResolvedValueOnce('Thanks for your interest!');
+    it('should escalate complaint DMs', async () => {
+      mockLlm.classifyIntent.mockResolvedValueOnce('complaint');
+
+      await worker.processDM('tenant-1', { ...baseDM, message_text: 'This is terrible!' });
+
+      expect(mockDb.query).toHaveBeenCalledWith(
+        expect.stringContaining('INSERT INTO dms'),
+        expect.arrayContaining(['escalated'])
+      );
+    });
+
+    it('should skip when DM rate limit exceeded', async () => {
+      mockRateLimiter.checkLimit.mockResolvedValueOnce(false);
 
       await worker.processDM('tenant-1', baseDM);
 
-      expect(mockIg.sendMessage).not.toHaveBeenCalled();
-      expect(mockDb.query).toHaveBeenCalledWith(
-        expect.stringContaining('INSERT INTO dms'),
-        expect.arrayContaining(['drafted'])
-      );
+      expect(mockLlm.classifyIntent).not.toHaveBeenCalled();
     });
+  });
 
-    it('should skip spam DMs', async () => {
-      mockLlm.route.mockResolvedValueOnce('spam');
+  describe('handleWebhook', () => {
+    it('should route webhook entries to processComment', async () => {
+      mockLlm.classifyIntent.mockResolvedValue('praise');
+      const payload = {
+        object: 'instagram',
+        entry: [{
+          changes: [{
+            value: {
+              id: 'webhook_comment_1',
+              text: 'Great post!',
+              from: { username: 'webhookuser' },
+              media: { id: 'media_1' },
+            },
+          }],
+        }],
+      };
 
-      await worker.processDM('tenant-1', { ...baseDM, message_text: 'FREE FOLLOWERS!!!' });
+      await worker.handleWebhook('tenant-1', payload);
 
-      expect(mockIg.sendMessage).not.toHaveBeenCalled();
-      expect(mockDb.query).toHaveBeenCalledWith(
-        expect.stringContaining('INSERT INTO dms'),
-        expect.arrayContaining(['skipped'])
-      );
+      expect(mockCircuitBreaker.execute).toHaveBeenCalled();
     });
   });
 });

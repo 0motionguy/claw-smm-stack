@@ -33,18 +33,18 @@ export class AdminWorker {
     // Check token validity
     try {
       const tenant = await this.db.query(
-        'SELECT ig_token_expires_at FROM tenants WHERE id = $1',
+        'SELECT meta_token_expires_at FROM tenants WHERE id = $1',
         [tenantId]
       );
-      if (tenant.rows[0]?.ig_token_expires_at) {
-        const expiresAt = new Date(tenant.rows[0].ig_token_expires_at);
+      if (tenant.rows[0]?.meta_token_expires_at) {
+        const expiresAt = new Date(tenant.rows[0].meta_token_expires_at);
         checks.token_valid = expiresAt > new Date();
       }
     } catch { /* noop */ }
 
     // Check rate limit headroom
     try {
-      const apiUsed = await this.redis.zcard(`ratelimit:${tenantId}:api`);
+      const apiUsed = await this.redis.zcard(`rate_limit:${tenantId}:api`);
       checks.rate_limit_ok = apiUsed < 160; // Under 180 limit with headroom
     } catch { /* noop */ }
 
@@ -86,13 +86,13 @@ export class AdminWorker {
 
   async checkTokenExpiry(tenantId: string): Promise<void> {
     const tenant = await this.db.query(
-      'SELECT ig_token_expires_at FROM tenants WHERE id = $1',
+      'SELECT meta_token_expires_at FROM tenants WHERE id = $1',
       [tenantId]
     );
 
-    if (!tenant.rows[0]?.ig_token_expires_at) return;
+    if (!tenant.rows[0]?.meta_token_expires_at) return;
 
-    const expiresAt = new Date(tenant.rows[0].ig_token_expires_at);
+    const expiresAt = new Date(tenant.rows[0].meta_token_expires_at);
     const daysUntilExpiry = (expiresAt.getTime() - Date.now()) / (1000 * 60 * 60 * 24);
 
     if (daysUntilExpiry <= 10) {

@@ -6,10 +6,10 @@ import { RateLimiter } from './utils/rate-limiter';
 import { TokenManager } from './utils/token-manager';
 import { InstagramClient } from './integrations/instagram';
 import { LLMRouter } from './integrations/llm';
-import { DeepSeekClient } from './integrations/deepseek';
+import { DeepSeekVectorStore } from './integrations/deepseek';
 import { ApifyClient } from './integrations/apify';
 import { MetricoolClient } from './integrations/metricool';
-import { EngageWorker } from './workers/engage.worker';
+import { EngagementWorker } from './workers/engage.worker';
 import { ContentWorker } from './workers/content.worker';
 import { CommsWorker } from './workers/comms.worker';
 import { IntelWorker } from './workers/intel.worker';
@@ -20,7 +20,7 @@ export interface RouterDeps {
   redis: IORedis;
   ig: InstagramClient;
   llm: LLMRouter;
-  rag: DeepSeekClient;
+  rag: DeepSeekVectorStore;
   apify: ApifyClient;
   metricool: MetricoolClient;
   rateLimiter: RateLimiter;
@@ -29,14 +29,14 @@ export interface RouterDeps {
 }
 
 export class TaskRouter {
-  private engage: EngageWorker;
+  private engage: EngagementWorker;
   private content: ContentWorker;
   private comms: CommsWorker;
   private intel: IntelWorker;
   private admin: AdminWorker;
 
   constructor(private deps: RouterDeps) {
-    this.engage = new EngageWorker(
+    this.engage = new EngagementWorker(
       deps.ig, deps.llm, deps.rag,
       deps.rateLimiter, deps.circuitBreaker, deps.db
     );

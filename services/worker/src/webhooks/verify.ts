@@ -16,5 +16,8 @@ export function verifyWebhookChallenge(mode: string, token: string, challenge: s
 export function verifySignature(payload: string, signature: string): boolean {
   if (!APP_SECRET || !signature) return false;
   const expectedSig = 'sha256=' + crypto.createHmac('sha256', APP_SECRET).update(payload).digest('hex');
-  return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSig));
+  const sigBuf = Buffer.from(signature);
+  const expectedBuf = Buffer.from(expectedSig);
+  if (sigBuf.length !== expectedBuf.length) return false;
+  return crypto.timingSafeEqual(sigBuf, expectedBuf);
 }

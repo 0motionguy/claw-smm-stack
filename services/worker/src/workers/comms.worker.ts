@@ -1,12 +1,12 @@
 import { Pool } from 'pg';
 import { logger } from '../utils/logger';
 import { LLMRouter } from '../integrations/llm';
-import { DeepSeekClient } from '../integrations/deepseek';
+import { DeepSeekVectorStore } from '../integrations/deepseek';
 
 export class CommsWorker {
   constructor(
     private llm: LLMRouter,
-    private rag: DeepSeekClient,
+    private rag: DeepSeekVectorStore,
     private db: Pool
   ) {}
 
