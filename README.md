@@ -1,144 +1,66 @@
-# 🦞 CLAW SMM STACK
+# Claw SMM Stack
 
-**AI Social Media Employee — $997/mo Productized Service**
+A multi-tenant stack for running an AI social media manager on Instagram: it triages comments and DMs, drafts or sends replies, plans content and reports to the client.
 
-> Multi-tenant, Docker-based AI employee that manages Instagram, replies to comments, handles DMs, and communicates with clients via WhatsApp/Telegram.
+Claw SMM Stack is aimed at an agency or operator who manages Instagram accounts for several small businesses and wants the repetitive work (answering comments, sorting DMs, writing captions, weekly numbers) handled by a queue of workers, with a human approving anything sensitive. Each client is a tenant with its own brand voice, off-limits topics, competitor list, rate limits and daily model budget. Account actions (replies, hiding, publishing, insights) go through Meta's Graph API.
 
-## Architecture
+## What it does
+
+- **Comment and DM triage** (`workers/engage.worker.ts`): each comment is classified as praise, question, complaint, spam or lead. Praise gets an automatic reply, questions get a draft that waits for approval, complaints are escalated to a human, spam is hidden and leads start a follow-up sequence. Context comes from a per-tenant vector store.
+- **Content planning** (`workers/content.worker.ts`): caption generation, publishing through the Graph API, scheduling through Metricool and 7-day content calendars.
+- **Intel** (`workers/intel.worker.ts`): analytics collection from Instagram insights, engagement spike checks and a weekly competitor pulse using public profile data through Apify actors.
+- **Client comms** (`workers/comms.worker.ts`): drafts the daily briefing, weekly report and new-lead notice with the LLM router and records them in the audit log. Delivery to the client's chat app is not wired in this repo.
+- **Admin** (`workers/admin.worker.ts`): per-tenant health checks, cost reports and Meta token expiry handling.
+- **Multi-model router** (`integrations/llm.ts`): task types map to three model tiers (a cheap default for classification and short replies, a stronger model for plans and reports, a premium one for client communication and crises) with token caps and a per-tenant daily budget that blocks calls once spent.
+- **Safety plumbing:** BullMQ queues for comments, DMs, content and reports; a circuit breaker around the Meta API; a Redis sliding-window rate limiter per tenant (API calls, DMs, publishes); webhook signature verification; a token manager that encrypts Meta tokens with AES-256-GCM and refreshes them before expiry; an `audit_log` table.
+- **Dashboard** (`services/dashboard`): Next.js pages for tenants (list, create, detail), an analytics page, an approval queue, a comment feed and a health endpoint, plus an Instagram webhook route.
+- **Operations:** scripts to onboard and remove a tenant, back up the database, deploy with migrations, rotate Meta tokens and seed a demo tenant. Eight cron jobs drive the heartbeat (health every 15 minutes, hourly analytics, daily briefing, weekly report, Friday competitor pulse, token and cost checks).
+
+## How it's built
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  CLIENT LAYER (WhatsApp/Telegram/Email)                     │
-├─────────────────────────────────────────────────────────────┤
-│  OpenClaw Gateway (Message Router + Auth)                   │
-├─────────────────────────────────────────────────────────────┤
-│  WORKER SERVICES                                            │
-│  ├── Content Worker (captions, calendars)                   │
-│  ├── Engagement Worker (comments, DMs) ⭐ CRITICAL          │
-│  ├── Intel Worker (competitor monitoring)                   │
-│  ├── Comms Worker (client briefings)                        │
-│  └── Admin Worker (analytics, reports)                      │
-├─────────────────────────────────────────────────────────────┤
-│  INTEGRATIONS                                               │
-│  ├── Meta Instagram Graph API                               │
-│  ├── Instagram Messaging API                                │
-│  ├── Qdrant (Vector DB / RAG)                               │
-│  ├── DeepSeek (Embeddings)                                  │
-│  └── Multi-LLM Router (Kimi/Opus/Claude)                    │
-├─────────────────────────────────────────────────────────────┤
-│  INFRASTRUCTURE                                             │
-│  ├── PostgreSQL (Tenant DB)                                 │
-│  ├── Redis (Queue + Cache)                                  │
-│  ├── n8n (Workflow Automation)                              │
-│  └── Next.js Dashboard                                      │
-└─────────────────────────────────────────────────────────────┘
+Meta webhooks --> webhook handler (signature check) --> BullMQ queues on Redis
+                                                              |
+                     task router --> engage / content / intel / comms / admin workers
+                                                              |
+                         PostgreSQL (tenants, posts, comments, dms, analytics, audit_log)
+                         Qdrant (RAG memory)    multi-model LLM router    Meta Graph API v21
 ```
 
-## Quick Start
+- **Worker service:** TypeScript on Node, Express, BullMQ, `node-cron`, `pg`, `ioredis`, zod and winston. Vitest tests cover the circuit breaker, router, engagement logic and Instagram client (32 test cases).
+- **Dashboard:** Next.js 15, React 19, Tailwind CSS and Recharts.
+- **Infrastructure:** Docker Compose runs seven services: the OpenClaw gateway, PostgreSQL 16, Redis 7, Qdrant, n8n, the worker and the dashboard. Six SQL migrations create the schema on first start.
+- **Agent definitions:** `config/` holds the gateway config, a SOUL and HEARTBEAT file and per-vertical SOUL templates (restaurant, e-commerce, creator); `skills/` holds five skill definitions, one per worker.
+
+## Repository layout
+
+- `services/worker/`: queue workers, integrations, utilities and tests.
+- `services/dashboard/`: the Next.js admin dashboard.
+- `migrations/`: six SQL files, run in order by the Postgres container.
+- `config/`: gateway config, SOUL and HEARTBEAT, vertical templates.
+- `skills/`: `smm-admin`, `smm-comms`, `smm-content`, `smm-engage`, `smm-intel`.
+- `scripts/`: tenant, backup, deploy, token rotation and seed scripts.
+- `docs/`: architecture, API reference, onboarding SOP and troubleshooting.
+- `docker-compose.yml`, `docker-compose.dev.yml`: full stack and infrastructure-only.
+
+## Run it locally
 
 ```bash
-# 1. Clone and setup
-git clone https://github.com/0motionguy/claw-smm-stack.git
-cd claw-smm-stack
-
-# 2. Configure environment
-cp .env.example .env
-# Edit .env with your API keys
-
-# 3. Start full stack
+cp .env.example .env            # fill in the values
 docker compose up -d
+curl localhost:4000/health      # worker
+./scripts/seed-demo.sh          # demo tenant
 
-# 4. Migrations run automatically via Docker entrypoint
-
-# 5. Verify
-curl localhost:4000/health   # Worker
-curl localhost:3000           # Dashboard
-
-# 6. Create demo tenant
-./scripts/seed-demo.sh
-```
-
-### Local Development
-
-```bash
-# Start infrastructure only
+# development: infrastructure in Docker, services on the host
 docker compose -f docker-compose.dev.yml up -d postgres redis qdrant
-
-# Worker (hot reload)
-cd services/worker && npm install && npm run dev
-
-# Dashboard (hot reload)
+cd services/worker && npm install && npm run dev      # npm test for the suite
 cd services/dashboard && npm install && npm run dev
 ```
 
-## Multi-Agent Team
+Environment variables (keys only, see `.env.example`): database (`DB_USER`, `DB_PASS`, `DB_NAME`, `DATABASE_URL`), `REDIS_URL`, `QDRANT_URL`, n8n login (`N8N_USER`, `N8N_PASS`), model providers (`MOONSHOT_API_KEY`, `OPENROUTER_API_KEY`, `GOOGLE_API_KEY`), Meta (`META_APP_ID`, `META_APP_SECRET`, `META_VERIFY_TOKEN`), `ENCRYPTION_KEY`, `LLM_DAILY_BUDGET_USD`, `WORKER_PORT`, and optional Telegram notification settings.
 
-- **CLAW (Mac)** - Coordinator, gateway, integrations
-- **Berni (AWS)** - Heavy compute, database, workers
-- **DROID (Solana Saga)** - Mobile testing, client demos
+You also need a Meta app with Instagram Graph API access and a client account connected to a Facebook Page; `docs/ONBOARDING.md` walks through it.
 
-## Revenue Model
+## Status
 
-| Tier | Price | Features |
-|------|-------|----------|
-| **Base** | $997/mo | 1 IG account, full automation |
-| **Assistant** | +$497/mo | Email, calendar, extended support |
-| **Multi-Channel** | +$297/mo/channel | TikTok, LinkedIn, X |
-| **White-Label** | Custom | Agency branding, multi-client |
-
-**Unit Economics:**
-- Revenue: $997/mo
-- Cost: $65-145/mo
-- **Margin: 85-93%**
-
-## Build Status
-
-- [x] Docker Compose stack (7 services: gateway, postgres, redis, qdrant, n8n, worker, dashboard)
-- [x] Database schema (6 migration files with indexes)
-- [x] Instagram Graph API v21.0 integration (comments, DMs, publishing, insights)
-- [x] Engagement Worker (classify -> route -> reply/draft/escalate/hide)
-- [x] Content Worker (captions, scheduling, calendar generation)
-- [x] Intel Worker (analytics, competitor monitoring, spike detection)
-- [x] Comms Worker (daily briefing, weekly report, lead notifications)
-- [x] Admin Worker (health checks, cost tracking, token management)
-- [x] DeepSeek RAG (Qdrant vector search)
-- [x] Multi-LLM Router (Kimi K2.5 80% / Opus 4.6 15% / Claude Pro 5%)
-- [x] BullMQ Job Queues (comment, dm, content, report)
-- [x] Heartbeat System (cron-driven: health, analytics, briefings, reports)
-- [x] Next.js Dashboard (tenant CRUD, analytics charts, approval queue)
-- [x] Circuit Breaker + Rate Limiter + Token Manager
-- [x] DROID Mobile Agent (Puppeteer + ADB automation)
-- [x] OpenClaw Skills (5 skill definitions)
-- [x] Operational Scripts (onboard, offboard, backup, deploy, seed)
-- [x] Tests (circuit-breaker, router, engage, instagram)
-- [x] Documentation (onboarding, troubleshooting, API, architecture)
-
-## Scripts
-
-| Script | Purpose |
-|--------|---------|
-| `scripts/tenant-new.sh` | Onboard new client |
-| `scripts/tenant-remove.sh` | Offboard client |
-| `scripts/secrets-rotate.sh` | Rotate Meta tokens |
-| `scripts/backup.sh` | Database backup |
-| `scripts/deploy.sh` | Zero-downtime deploy |
-| `scripts/seed-demo.sh` | Create demo tenant |
-
-## Key Constraints
-
-- All API calls through circuit breaker (max 3 failures -> pause)
-- All LLM calls through router (never direct) with $5/day budget per tenant
-- Rate limits: 180 API/hr, 190 DM/hr, 20 publishes/24hr per tenant
-- TypeScript strict mode, Zod validation on all boundaries
-- All actions logged to audit_log with cost tracking
-
-## Docs
-
-- [Onboarding](docs/ONBOARDING.md) - Client onboarding SOP
-- [Troubleshooting](docs/TROUBLESHOOTING.md) - Common issues
-- [API Reference](docs/API.md) - Endpoint docs
-- [Architecture](docs/ARCHITECTURE.md) - System design
-
-## License
-
-Private - ICM Motion / Basil Dolger
+Prototype. The worker pipeline, schema and unit tests are the most complete part. The dashboard is a scaffold: its API routes read `DB_HOST` and `DB_PASSWORD` while Compose passes `DATABASE_URL`, and they query `direct_messages` and `tenant_metrics`, which the migrations do not create. The stack has not been verified against a live Meta app in this repository. Seven commits, 2026-02-11 to 2026-02-13.
